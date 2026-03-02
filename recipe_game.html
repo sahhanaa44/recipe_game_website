@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>★ THE RECIPE GAME ★</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#060610; overflow:hidden; }
+body {
+    display:flex; justify-content:center; align-items:center;
+    font-family:'Courier New',monospace;
+}
+body::before {
+    content:''; position:fixed; inset:0;
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(120,40,255,0.1) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 80%, rgba(255,40,130,0.07) 0%, transparent 50%);
+    pointer-events:none;
+}
+#gameContainer {
+    border-radius:12px; overflow:hidden;
+    box-shadow:0 0 60px rgba(130,50,255,0.3);
+    border:1px solid rgba(180,100,255,0.18);
+    transform-origin:center center;
+}
+canvas { display:block; user-select:none; -webkit-user-select:none; }
+#fsBtn {
+    position:fixed; top:14px; right:14px;
+    background:rgba(100,40,200,0.8); color:#fff;
+    border:1px solid rgba(200,150,255,0.35);
+    padding:7px 15px; border-radius:7px;
+    font-family:'Courier New',monospace; font-size:11px;
+    cursor:pointer; z-index:1000; letter-spacing:1px; text-transform:uppercase;
+    transition:background 0.2s;
+}
+#fsBtn:hover { background:rgba(140,60,255,1); }
+</style>
+</head>
+<body>
+<button id="fsBtn">&#x26F6; FULLSCREEN</button>
+<div id="gameContainer">
+<canvas id="C" width="1200" height="760"></canvas>
+</div>
+<script>
+const cv = document.getElementById('C');
+const cx = cv.getContext('2d');
+
+/* ═══════════════════════════════════════════════════════════════
+   CONSTANTS
+══════════════════════════════════════════════════════════════════ */
+const ING_TOP = 424, ING_H = 290;
+const IC_W = 116, IC_H = 82, IC_PX = 11, IC_PY = 9, IC_COLS = 5, IC_X0 = 38;
+const RC_W = 102, RC_H = 62, RC_PX = 9, RC_PY = 7, RC_COLS = 6, RC_X0 = 36, RC_Y0 = 132;
+
+const PAL = {
+    bg:'#060610', panel:'#0b0b19',
+    border:'rgba(150,80,255,0.2)', glow:'rgba(110,45,255,0.25)',
+    acc:'#9b4dff', acc2:'#ff4daa',
+    green:'#00ffaa', red:'#ff3355', orange:'#ff8833',
+    cyan:'#33ddff', yellow:'#ffdd44', silver:'#c8c8d8',
+    bright:'#ede8ff', mid:'#8878b0', dim:'#3c3458',
+};
+const MN  = '"Consolas","Courier New",monospace';
+const TTL = '"Impact","Arial Black",sans-serif';
+const SR  = '"Palatino Linotype","Book Antiqua",Palatino,serif';
+
+/* ═══════════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════════════ */
+let ings=[], recipe=[], rules=[];
+let lvl=1, msg="Drag or click ingredients to build your recipe", msgCol="#8866ff";
+let mx=0, my=0, frame=0, parts=[];
+let scrollY=0, scrollT=0, totalH=0;
+let hovIng=-1, hovRec=-1, hovSub=false, hovClr=false;
+
+// Drag
+let drag = {
+    on: false,
+    type: '',     // 'ing' | 'rec'
+    srcIdx: -1,
+    item: null,
+    cx: 0, cy: 0,           // cursor position
+    ox: 0, oy: 0,           // offset from card center
+    dropSlot: -1,           // which recipe slot we're over (-1 = none, recipe.length = append)
+    overTrash: false,
+    overRecipe: false,
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════════════════════════ */
+function initIngs(){
+    const D=[
+        {name:"Tomato",   color:"#bb2020",cal:20,  cat:"vegetable"},
+        {name:"Carrot",   color:"#cc5500",cal:25,  cat:"vegetable"},
+        {name:"Broccoli", color:"#1f6b1f",cal:30,  cat:"vegetable"},
+        {name:"Quinoa",   color:"#9e7a28",cal:120, cat:"grain"},
+        {name:"Apple",    color:"#991111",cal:52,  cat:"fruit"},
+        {name:"Banana",   color:"#bb9900",cal:89,  cat:"fruit"},
+        {name:"Orange",   color:"#cc5500",cal:47,  cat:"fruit"},
+        {name:"Blueberry",color:"#2a3d88",cal:57,  cat:"fruit"},
+        {name:"Chicken",  color:"#9e7744",cal:165, cat:"meat"},
+        {name:"Salmon",   color:"#cc5533",cal:208, cat:"meat"},
+        {name:"Beef",     color:"#6e2222",cal:250, cat:"meat"},
+        {name:"Tofu",     color:"#aaaa88",cal:76,  cat:"grain"},
+        {name:"Cheese",   color:"#cc8800",cal:110, cat:"dairy"},
+        {name:"Milk",     color:"#aaaaaa",cal:60,  cat:"dairy"},
+        {name:"Egg",      color:"#bb9944",cal:70,  cat:"dairy"},
+        {name:"Rice",     color:"#aaaaaa",cal:130, cat:"grain"},
+        {name:"Avocado",  color:"#336622",cal:160, cat:"fruit"},
+        {name:"Onion",    color:"#6644aa",cal:40,  cat:"vegetable"},
+        {name:"Squid",    color:"#556688",cal:92,  cat:"meat"},
+        {name:"Mushroom", color:"#775533",cal:22,  cat:"vegetable"},
+        {name:"Lentils",  color:"#885522",cal:116, cat:"grain"},
+        {name:"Spinach",  color:"#1a5c1a",cal:23,  cat:"vegetable"},
+        {name:"Shrimp",   color:"#cc6644",cal:84,  cat:"meat"},
+        {name:"Mango",    color:"#dd7700",cal:60,  cat:"fruit"},
+        {name:"Kale",     color:"#2a6e2a",cal:33,  cat:"vegetable"},
+    ];
+    ings = D.map((d,i)=>({...d, col:i%IC_COLS, row:Math.floor(i/IC_COLS),
+        inR:false, bob:Math.random()*Math.PI*2 }));
+    totalH = Math.ceil(D.length/IC_COLS)*(IC_H+IC_PY);
+}
+
+function initRules(){
+    const nc=()=>null;
+    rules=[
+        {d:"At least 3 ingredients",            f:()=>recipe.length<3?`Need ≥3 (have ${recipe.length})`:nc()},
+        {d:"Must include a vegetable",           f:()=>recipe.some(i=>i.cat==='vegetable')?nc():"Add a vegetable"},
+        {d:"No two RED items in a row",          f:noRed},
+        {d:"Total letters: 20 to 35",            f:()=>{const n=letC();return(n<20||n>35)?`Letters 20-35 (have ${n})`:nc();}},
+        {d:"Max 500 calories",                   f:()=>{const n=calC();return n>500?`Max 500 cal (have ${n})`:nc();}},
+        {d:"Must contain letter Q",              f:()=>recipe.some(i=>i.name.toLowerCase().includes('q'))?nc():"Need ingredient with Q"},
+        {d:"Must include a fruit",               f:()=>recipe.some(i=>i.cat==='fruit')?nc():"Add a fruit"},
+        {d:"First item starts with vowel",       f:()=>{if(!recipe.length)return nc();return'aeiouAEIOU'.includes(recipe[0].name[0])?nc():"First must start A/E/I/O/U";}},
+        {d:"EVEN number of ingredients",         f:()=>recipe.length%2===0?nc():`Need even count (have ${recipe.length})`},
+        {d:"NO DAIRY ALLOWED",                   f:()=>recipe.some(i=>i.cat==='dairy')?"No dairy allowed":nc()},
+        {d:"At least 5 ingredients",             f:()=>recipe.length<5?`Need ≥5 (have ${recipe.length})`:nc()},
+        {d:"Must include a meat",                f:()=>recipe.some(i=>i.cat==='meat')?nc():"Add a meat"},
+        {d:"No same category twice in a row",    f:noCatRep},
+        {d:"Last ingredient ends in vowel",      f:()=>{if(!recipe.length)return nc();const l=recipe[recipe.length-1].name;return'aeiouAEIOU'.includes(l[l.length-1])?nc():"Last item must end in vowel";}},
+        {d:"Fruits must outnumber vegetables",   f:()=>{const f=recipe.filter(i=>i.cat==='fruit').length,v=recipe.filter(i=>i.cat==='vegetable').length;return f>v?nc():`Fruits(${f}) must beat veg(${v})`;}},
+        {d:"No two share the same first letter", f:uniqFirst},
+        {d:"Total calories must be ODD",         f:()=>{const n=calC();return n%2!==0?nc():`Calories (${n}) must be odd`;}},
+        {d:"Ingredients in alphabetical order",  f:checkAlpha},
+    ].map((r,i)=>({...r, active:i===0}));
+}
+
+function letC(){ return recipe.reduce((s,i)=>s+i.name.length,0); }
+function calC(){ return recipe.reduce((s,i)=>s+i.cal,0); }
+function isRed(c){ return parseInt(c.slice(1,3),16)>140&&parseInt(c.slice(3,5),16)<80; }
+function noRed(){ for(let i=0;i<recipe.length-1;i++) if(isRed(recipe[i].color)&&isRed(recipe[i+1].color)) return "Two RED items in a row"; return null; }
+function noCatRep(){ for(let i=0;i<recipe.length-1;i++) if(recipe[i].cat===recipe[i+1].cat) return `Two ${recipe[i].cat}s in a row`; return null; }
+function uniqFirst(){ const f=recipe.map(i=>i.name[0].toLowerCase()); const d=f.find((x,i)=>f.indexOf(x)!==i); return d?`Multiple items start '${d.toUpperCase()}'`:null; }
+function checkAlpha(){ for(let i=0;i<recipe.length-1;i++) if(recipe[i].name.toLowerCase()>recipe[i+1].name.toLowerCase()) return `${recipe[i].name} before ${recipe[i+1].name}?`; return null; }
+
+/* ═══════════════════════════════════════════════════════════════
+   GAME ACTIONS
+══════════════════════════════════════════════════════════════════ */
+function addIng(ing, slot=-1){
+    if(recipe.length>=12){ setMsg("Recipe full!",PAL.orange); return false; }
+    if(ing.inR){ setMsg("Already in recipe!",PAL.orange); return false; }
+    const item={...ing};
+    if(slot>=0&&slot<=recipe.length) recipe.splice(slot,0,item);
+    else recipe.push(item);
+    ing.inR=true;
+    burst(mx,my,ing.color);
+    setMsg(`${ing.name} added`,PAL.green);
+    return true;
+}
+
+function removeRec(idx){
+    const item=recipe[idx];
+    const ing=ings.find(i=>i.name===item.name);
+    if(ing) ing.inR=false;
+    recipe.splice(idx,1);
+    setMsg(`${item.name} removed`,PAL.orange);
+}
+
+function moveRec(from,to){
+    if(from===to||from===to-1) return;
+    const item=recipe.splice(from,1)[0];
+    const t=Math.max(0,Math.min(recipe.length, to>from?to-1:to));
+    recipe.splice(t,0,item);
+    setMsg(`Reordered recipe`,PAL.cyan);
+}
+
+function submit(){
+    for(const r of rules){ if(r.active){ const e=r.f(); if(e){ setMsg(e,PAL.red); return; } } }
+    lvl++;
+    if(lvl<=rules.length){ rules[lvl-1].active=true; setMsg(`LEVEL ${lvl} — new rule!`,PAL.yellow); burst(600,60,PAL.yellow,28); }
+    else { setMsg("GRAND MASTER CHEF — ALL LEVELS CLEARED!",PAL.silver); burst(600,60,PAL.silver,50); }
+}
+function clearR(){ recipe=[]; ings.forEach(i=>i.inR=false); setMsg("Recipe cleared",PAL.cyan); }
+function setMsg(m,c){ msg=m; msgCol=c; }
+
+/* ═══════════════════════════════════════════════════════════════
+   PARTICLES
+══════════════════════════════════════════════════════════════════ */
+function burst(x,y,col,n=10){
+    for(let i=0;i<n;i++) parts.push({x,y,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6-2,life:1,size:Math.random()*4+2,col});
+}
+function tickParts(){
+    parts=parts.filter(p=>p.life>0.02);
+    for(const p of parts){
+        p.x+=p.vx; p.y+=p.vy; p.vy+=0.15; p.life*=0.91;
+        cx.save(); cx.globalAlpha=p.life*.75;
+        cx.fillStyle=p.col; cx.shadowColor=p.col; cx.shadowBlur=7;
+        cx.beginPath(); cx.arc(p.x,p.y,p.size*p.life,0,6.28); cx.fill();
+        cx.restore();
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DRAW HELPERS
+══════════════════════════════════════════════════════════════════ */
+function rrp(x,y,w,h,r){
+    cx.beginPath();
+    cx.moveTo(x+r,y); cx.lineTo(x+w-r,y); cx.arcTo(x+w,y,x+w,y+r,r);
+    cx.lineTo(x+w,y+h-r); cx.arcTo(x+w,y+h,x+w-r,y+h,r);
+    cx.lineTo(x+r,y+h); cx.arcTo(x,y+h,x,y+h-r,r);
+    cx.lineTo(x,y+r); cx.arcTo(x,y,x+r,y,r); cx.closePath();
+}
+function fRR(x,y,w,h,r,f){ rrp(x,y,w,h,r); cx.fillStyle=f; cx.fill(); }
+function sRR(x,y,w,h,r,s,lw){ rrp(x,y,w,h,r); cx.strokeStyle=s; cx.lineWidth=lw||1.5; cx.stroke(); }
+
+function ingX(i){ return IC_X0+i.col*(IC_W+IC_PX); }
+function ingY(i){ return ING_TOP+i.row*(IC_H+IC_PY)-scrollY; }
+function recSlotXY(i){
+    return { x:RC_X0+(i%RC_COLS)*(RC_W+RC_PX), y:RC_Y0+Math.floor(i/RC_COLS)*(RC_H+RC_PY) };
+}
+
+function parseCol(c){ return [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)]; }
+function brighten(c,a){ const [r,g,b]=parseCol(c); return `rgb(${Math.min(r+a,255)},${Math.min(g+a,255)},${Math.min(b+a,255)})`; }
+function darkBg(c,f=0.1){ const [r,g,b]=parseCol(c); return `rgba(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)},0.97)`; }
+function colA(c,a){ const [r,g,b]=parseCol(c); return `rgba(${r},${g},${b},${a})`; }
+
+function drawIngCard(x,y,w,h,item,alpha=1,glow=0,glowCol=null,overlay=null){
+    cx.save(); cx.globalAlpha=alpha;
+    if(glow>0.01){ cx.shadowColor=glowCol||item.color; cx.shadowBlur=24*glow; }
+    fRR(x,y,w,h,9,darkBg(item.color,0.11));
+    sRR(x,y,w,h,9,colA(item.color,0.35+glow*0.6));
+    // sheen
+    const sh=cx.createLinearGradient(x,y,x,y+h*.5);
+    sh.addColorStop(0,`rgba(255,255,255,${0.04+glow*0.06})`); sh.addColorStop(1,'transparent');
+    rrp(x,y,w,h*.5,9); cx.fillStyle=sh; cx.fill();
+    cx.shadowBlur=0;
+    // name
+    cx.font=`bold 13px ${SR}`;
+    cx.fillStyle=alpha<0.5?colA(item.color,0.35):brighten(item.color,100);
+    cx.textAlign='center';
+    cx.shadowColor=colA(item.color,0.6); cx.shadowBlur=glow*10;
+    cx.fillText(item.name,x+w/2,y+h/2+4);
+    cx.shadowBlur=0;
+    // cal
+    cx.font=`10px ${MN}`; cx.fillStyle=alpha<0.5?colA(item.color,0.2):PAL.mid;
+    cx.fillText(`${item.cal}cal`,x+w/2,y+h-10);
+    if(overlay){ cx.fillStyle='rgba(255,40,70,0.15)'; rrp(x,y,w,h,9); cx.fill(); cx.font=`bold 9px ${MN}`; cx.fillStyle=PAL.red; cx.shadowBlur=0; cx.fillText(overlay,x+w/2,y+h/2+16); }
+    cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TITLE
+══════════════════════════════════════════════════════════════════ */
+function drawTitle(){
+    const W=cv.width, pulse=0.8+Math.sin(frame*.05)*.2;
+    // strip
+    const g=cx.createLinearGradient(0,0,W,0);
+    g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(.3,'rgba(120,45,255,0.09)');
+    g.addColorStop(.7,'rgba(255,45,120,0.06)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    cx.fillStyle=g; cx.fillRect(0,0,W,90);
+    // divider
+    const dg=cx.createLinearGradient(0,0,W,0);
+    dg.addColorStop(0,'transparent'); dg.addColorStop(.15,PAL.acc); dg.addColorStop(.85,PAL.acc2); dg.addColorStop(1,'transparent');
+    cx.fillStyle=dg; cx.fillRect(0,89,W,1.5);
+    // silver stars
+    cx.save(); cx.font=`bold 32px ${TTL}`; cx.textAlign='center';
+    cx.fillStyle=PAL.silver; cx.shadowColor=PAL.silver; cx.shadowBlur=18*pulse;
+    cx.fillText('★',W/2-310,64); cx.fillText('★',W/2+310,64); cx.restore();
+    // title
+    cx.save(); cx.font=`900 50px ${TTL}`; cx.textAlign='center';
+    const tg=cx.createLinearGradient(W/2-280,0,W/2+280,0);
+    tg.addColorStop(0,PAL.acc); tg.addColorStop(.45,'#dd88ff'); tg.addColorStop(.55,'#ff88cc'); tg.addColorStop(1,PAL.acc2);
+    cx.fillStyle=tg; cx.shadowColor='rgba(155,75,255,0.7)'; cx.shadowBlur=26;
+    cx.fillText('THE  RECIPE  GAME',W/2,64); cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RECIPE PANEL
+══════════════════════════════════════════════════════════════════ */
+function drawRecipe(){
+    const RX=20,RY=97,RW=750,RH=314;
+    cx.save(); cx.shadowColor=PAL.glow; cx.shadowBlur=20; fRR(RX,RY,RW,RH,12,PAL.panel); cx.restore();
+    sRR(RX,RY,RW,RH,12,PAL.border);
+    const tg=cx.createLinearGradient(RX,RY,RX+RW,RY);
+    tg.addColorStop(0,PAL.acc); tg.addColorStop(1,PAL.acc2);
+    fRR(RX,RY,RW,3,2,tg);
+
+    cx.save(); cx.font=`bold 13px ${MN}`; cx.fillStyle=PAL.acc; cx.shadowColor=PAL.acc; cx.shadowBlur=7;
+    cx.textAlign='left'; cx.fillText('YOUR RECIPE',RX+17,RY+23); cx.restore();
+
+    // "drag here" hint when empty
+    if(!recipe.length){
+        cx.save(); cx.font=`13px ${MN}`; cx.fillStyle=PAL.dim; cx.textAlign='center';
+        // highlight drop zone if dragging
+        if(drag.on){
+            fRR(RX+16,RY+35,RW-32,RH-95,8,'rgba(155,77,255,0.06)');
+            sRR(RX+16,RY+35,RW-32,RH-95,8,`rgba(155,77,255,${0.3+Math.sin(frame*.1)*.2})`,1.5);
+            cx.fillStyle=PAL.acc;
+            cx.fillText('DROP HERE',RX+RW/2,RY+RH/2-30);
+        } else {
+            cx.fillText('drag or click ingredients below',RX+RW/2,RY+RH/2-30);
+        }
+        cx.restore();
+    }
+
+    // Recipe cards
+    recipe.forEach((item,i)=>{
+        if(drag.on && drag.type==='rec' && drag.srcIdx===i) return; // skip the one being dragged
+        const s=recSlotXY(i);
+        // shift right if drag slot is between items
+        let dx=0;
+        if(drag.on && drag.dropSlot===i && drag.overRecipe){
+            dx=RC_W+RC_PX; // push right to show gap
+        }
+        const isHov=hovRec===i && !drag.on;
+        drawIngCard(s.x+dx, s.y, RC_W, RC_H, item, 1, isHov?0.7:0, item.color, isHov?'REMOVE':null);
+    });
+
+    // Ghost slot at end (drop zone)
+    if(drag.on && drag.overRecipe){
+        const slot=drag.dropSlot;
+        const s=recSlotXY(slot>=0?slot:recipe.length);
+        const alpha=0.4+Math.sin(frame*.12)*.2;
+        fRR(s.x,s.y,RC_W,RC_H,9,`rgba(155,77,255,${alpha*0.15})`);
+        sRR(s.x,s.y,RC_W,RC_H,9,`rgba(155,77,255,${alpha})`,2);
+        if(drag.item){
+            cx.save(); cx.globalAlpha=0.4;
+            cx.font=`bold 12px ${SR}`; cx.fillStyle=brighten(drag.item.color,80); cx.textAlign='center';
+            cx.fillText(drag.item.name,s.x+RC_W/2,s.y+RC_H/2+4);
+            cx.restore();
+        }
+    }
+
+    // Stats
+    const sY=RY+RH-60;
+    fRR(RX+14,sY,RW-28,50,8,'rgba(0,0,0,0.4)'); sRR(RX+14,sY,RW-28,50,8,'rgba(155,77,255,0.1)');
+    const cl=calC(), lt=letC();
+    [{label:'ITEMS',val:recipe.length,col:PAL.cyan,x:RX+88},{label:'LETTERS',val:lt,col:PAL.acc,x:RX+296},{label:'CALORIES',val:cl,col:cl>500?PAL.red:PAL.green,x:RX+526}].forEach(s=>{
+        cx.save();
+        cx.font=`bold 9px 'Arial Narrow',Arial,sans-serif`; cx.letterSpacing='1px';
+        cx.fillStyle=PAL.dim; cx.textAlign='center'; cx.fillText(s.label,s.x,sY+13);
+        fRR(s.x-25,sY+17,50,24,5,'rgba(0,0,0,0.55)'); sRR(s.x-25,sY+17,50,24,5,s.col,1);
+        cx.font=`bold 15px ${MN}`; cx.fillStyle=s.col; cx.shadowColor=s.col; cx.shadowBlur=7;
+        cx.fillText(s.val,s.x,sY+36); cx.restore();
+    });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RULES PANEL
+══════════════════════════════════════════════════════════════════ */
+function drawRules(){
+    const RX=782,RY=97,RW=398,RH=314;
+    cx.save(); cx.shadowColor='rgba(255,55,155,0.15)'; cx.shadowBlur=20; fRR(RX,RY,RW,RH,12,PAL.panel); cx.restore();
+    sRR(RX,RY,RW,RH,12,'rgba(255,55,155,0.16)');
+    const tg=cx.createLinearGradient(RX,RY,RX+RW,RY);
+    tg.addColorStop(0,PAL.acc2); tg.addColorStop(1,PAL.acc);
+    fRR(RX,RY,RW,3,2,tg);
+
+    cx.save(); cx.font=`bold 13px ${MN}`; cx.fillStyle=PAL.acc2; cx.shadowColor=PAL.acc2; cx.shadowBlur=7;
+    cx.textAlign='left'; cx.fillText('ACTIVE RULES',RX+17,RY+23); cx.restore();
+
+    // level badge
+    cx.save(); fRR(RX+RW-82,RY+9,68,22,11,PAL.acc); cx.shadowColor=PAL.acc; cx.shadowBlur=10;
+    cx.font=`bold 10px ${MN}`; cx.fillStyle='#fff'; cx.textAlign='center';
+    cx.fillText(`LEVEL ${lvl}`,RX+RW-48,RY+24); cx.restore();
+
+    // progress bar
+    const active=rules.filter(r=>r.active).length;
+    fRR(RX+17,RY+30,RW-34,4,2,'rgba(255,255,255,0.04)');
+    const pg=cx.createLinearGradient(RX+17,0,RX+17+RW-34,0);
+    pg.addColorStop(0,PAL.acc2); pg.addColorStop(1,PAL.acc);
+    fRR(RX+17,RY+30,(RW-34)*(active/rules.length),4,2,pg);
+
+    const aRules=rules.filter(r=>r.active);
+    const start=Math.max(0,aRules.length-7);
+    let ry=RY+44;
+    aRules.slice(start).forEach((rule,ri)=>{
+        const n=start+ri+1;
+        fRR(RX+12,ry,RW-24,27,5,'rgba(255,255,255,0.02)');
+        sRR(RX+12,ry,RW-24,27,5,'rgba(255,55,155,0.09)');
+        cx.save();
+        cx.font=`bold 10px ${MN}`; cx.fillStyle=PAL.acc2; cx.shadowColor=PAL.acc2; cx.shadowBlur=4;
+        cx.textAlign='center'; cx.fillText(String(n).padStart(2,'0'),RX+27,ry+18);
+        cx.font=`11px ${MN}`; cx.fillStyle=PAL.bright; cx.shadowBlur=0; cx.textAlign='left';
+        let d=rule.d; if(cx.measureText(d).width>RW-72) d=d.slice(0,31)+'…';
+        cx.fillText(d,RX+42,ry+18); cx.restore();
+        ry+=32;
+    });
+    if(!aRules.length){
+        cx.save(); cx.font=`11px ${MN}`; cx.fillStyle=PAL.dim; cx.textAlign='left';
+        cx.fillText('// click ingredients to begin',RX+17,RY+65); cx.restore();
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BUTTONS  (no top bar artifacts — drawing clean fills only)
+══════════════════════════════════════════════════════════════════ */
+function drawButtons(){
+    const BY=422, BH=50;
+    // SUBMIT
+    const SX=782,SW=190;
+    cx.save();
+    cx.shadowColor=hovSub?PAL.acc:'rgba(110,40,230,0.3)'; cx.shadowBlur=hovSub?26:10;
+    const sg=cx.createLinearGradient(SX,BY,SX,BY+BH);
+    sg.addColorStop(0,hovSub?'#b870ff':'#9b4dff'); sg.addColorStop(1,hovSub?'#7c28ee':'#5a0eaa');
+    fRR(SX,BY,SW,BH,10,sg);
+    sRR(SX,BY,SW,BH,10,hovSub?'rgba(220,170,255,0.5)':'rgba(180,120,255,0.25)',1.5);
+    cx.font=`bold 15px ${MN}`; cx.fillStyle='#fff'; cx.textAlign='center';
+    cx.shadowColor='rgba(255,255,255,0.35)'; cx.shadowBlur=hovSub?8:0;
+    cx.fillText('SUBMIT',SX+SW/2,BY+32); cx.restore();
+    // CLEAR
+    const CX=982,CW=174;
+    cx.save();
+    cx.shadowColor=hovClr?PAL.orange:'rgba(230,100,30,0.28)'; cx.shadowBlur=hovClr?22:8;
+    const cg=cx.createLinearGradient(CX,BY,CX,BY+BH);
+    cg.addColorStop(0,hovClr?'#ffaa44':'#dd6622'); cg.addColorStop(1,hovClr?'#cc7700':'#881100');
+    fRR(CX,BY,CW,BH,10,cg);
+    sRR(CX,BY,CW,BH,10,hovClr?'rgba(255,200,100,0.5)':'rgba(255,150,50,0.22)',1.5);
+    cx.font=`bold 15px ${MN}`; cx.fillStyle='#fff'; cx.textAlign='center';
+    cx.shadowColor='rgba(255,220,150,0.4)'; cx.shadowBlur=hovClr?8:0;
+    cx.fillText('CLEAR',CX+CW/2,BY+32); cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INGREDIENTS
+══════════════════════════════════════════════════════════════════ */
+function drawIngredients(){
+    scrollY += (scrollT-scrollY)*0.1;
+
+    const SB_W = 8;    // scrollbar width
+    const SB_X = IC_X0 + IC_COLS*(IC_W+IC_PX) + 6; // right of last column
+    const sc = totalH - ING_H;
+
+    // draw scrollbar track + thumb OUTSIDE clip (so they're always visible)
+    if(sc > 0){
+        const trackH = ING_H - 10;
+        const trackX = SB_X, trackY = ING_TOP + 5;
+        // track
+        cx.save();
+        fRR(trackX, trackY, SB_W, trackH, 4, 'rgba(255,255,255,0.06)');
+        // thumb
+        const thumbH = Math.max(30, trackH * (ING_H / totalH));
+        const thumbY = trackY + (trackH - thumbH) * (scrollY / sc);
+        const tg = cx.createLinearGradient(0, thumbY, 0, thumbY+thumbH);
+        tg.addColorStop(0, PAL.acc); tg.addColorStop(1, PAL.acc2);
+        cx.shadowColor = PAL.acc; cx.shadowBlur = 6;
+        fRR(trackX, thumbY, SB_W, thumbH, 4, tg);
+        cx.restore();
+    }
+
+    // strictly clip ALL drawing to ingredient panel only
+    cx.save();
+    cx.beginPath();
+    cx.rect(0, ING_TOP, 1200, ING_H);
+    cx.clip();
+
+    ings.forEach((ing,i)=>{
+        const ix=ingX(ing), iy=ingY(ing);
+        if(iy+IC_H<ING_TOP-2||iy>ING_TOP+ING_H+2) return;
+        const isDragging=drag.on&&drag.type==='ing'&&drag.srcIdx===i;
+        const hov=hovIng===i&&!ing.inR&&!drag.on;
+        const bob=Math.sin(frame*0.038+ing.bob)*2.2;
+        const alpha=isDragging?0.18:(ing.inR?0.25:1);
+        const glow=hov?0.7:0;
+        drawIngCard(ix,iy+bob,IC_W,IC_H,ing,alpha,glow,ing.color);
+    });
+
+    cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DRAG GHOST
+══════════════════════════════════════════════════════════════════ */
+function drawDragGhost(){
+    if(!drag.on||!drag.item) return;
+    const w=IC_W,h=IC_H;
+    cx.save(); cx.shadowColor=drag.item.color; cx.shadowBlur=30; cx.globalAlpha=0.9;
+    drawIngCard(drag.cx-w/2,drag.cy-h/2,w,h,drag.item,0.92,0.9,drag.item.color);
+    cx.restore();
+    // drag label
+    cx.save(); cx.font=`bold 10px ${MN}`; cx.fillStyle='rgba(255,255,255,0.6)'; cx.textAlign='center';
+    cx.fillText('DRAGGING',drag.cx,drag.cy+h/2+14); cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STATUS
+══════════════════════════════════════════════════════════════════ */
+function drawStatus(){
+    const sy=760-44;
+    cx.fillStyle='rgba(3,3,14,0.94)'; cx.fillRect(0,sy,1200,44);
+    cx.fillStyle='rgba(150,80,255,0.15)'; cx.fillRect(0,sy,1200,1);
+    const icons={[PAL.red]:'!!', [PAL.green]:'OK', [PAL.orange]:'--',
+                 [PAL.yellow]:'**', [PAL.silver]:'★★', [PAL.cyan]:'>>',
+                 '#8866ff':'//','rgba(155,77,255,1)':'--'};
+    cx.save();
+    cx.font=`bold 12px ${MN}`; cx.fillStyle=msgCol; cx.shadowColor=msgCol; cx.shadowBlur=9;
+    cx.textAlign='left'; cx.fillText(icons[msgCol]||'//',20,sy+29);
+    cx.shadowBlur=0; cx.fillStyle=PAL.bright;
+    cx.fillText(msg,58,sy+29); cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCANLINES
+══════════════════════════════════════════════════════════════════ */
+function scanlines(){
+    cx.save(); cx.globalAlpha=0.014; cx.fillStyle='#000';
+    for(let y=0;y<760;y+=3) cx.fillRect(0,y,1200,1);
+    cx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HOVER CALC
+══════════════════════════════════════════════════════════════════ */
+function calcHov(){
+    hovIng=-1;
+    ings.forEach((ing,i)=>{
+        const ix=ingX(ing),iy=ingY(ing);
+        if(mx>=ix&&mx<=ix+IC_W&&my>=iy&&my<=iy+IC_H) hovIng=i;
+    });
+    hovRec=-1;
+    recipe.forEach((_,i)=>{
+        const s=recSlotXY(i);
+        if(mx>=s.x&&mx<=s.x+RC_W&&my>=s.y&&my<=s.y+RC_H) hovRec=i;
+    });
+    hovSub=mx>=782&&mx<=972&&my>=422&&my<=472;
+    hovClr=mx>=982&&mx<=1156&&my>=422&&my<=472;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DRAG OVER DETECTION
+══════════════════════════════════════════════════════════════════ */
+function calcDragOver(){
+    if(!drag.on) return;
+    const overPanel = mx>=20&&mx<=770&&my>=97&&my<=97+314;
+    drag.overRecipe = overPanel;
+    drag.overTrash  = mx>=782&&mx<=1180&&my>=97&&my<=97+314 && drag.type==='rec';
+
+    if(drag.overRecipe){
+        // find insert slot
+        let slot=recipe.length;
+        for(let i=0;i<recipe.length;i++){
+            const s=recSlotXY(i);
+            if(mx<s.x+RC_W/2){ slot=i; break; }
+        }
+        drag.dropSlot=slot;
+    } else {
+        drag.dropSlot=-1;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN LOOP
+══════════════════════════════════════════════════════════════════ */
+function loop(){
+    frame++;
+    cx.setTransform(fsScale,0,0,fsScale,0,0);
+    cx.fillStyle=PAL.bg; cx.fillRect(0,0,cv.width/fsScale,cv.height/fsScale);
+    const bg=cx.createRadialGradient(600,390,0,600,390,680);
+    bg.addColorStop(0,'rgba(65,22,130,0.06)'); bg.addColorStop(1,'transparent');
+    cx.fillStyle=bg; cx.fillRect(0,0,1200,760);
+    calcHov(); calcDragOver();
+    drawTitle(); drawRecipe(); drawRules(); drawIngredients(); drawButtons();
+    drawDragGhost(); tickParts(); drawStatus(); scanlines();
+    // cursor
+    cv.style.cursor=drag.on?'grabbing':
+        (hovIng>=0&&!ings[hovIng].inR)||hovRec>=0||hovSub||hovClr?'pointer':'default';
+    requestAnimationFrame(loop);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INPUT HELPERS
+══════════════════════════════════════════════════════════════════ */
+function getXY(e){
+    const r=cv.getBoundingClientRect();
+    const t=e.touches?e.touches[0]:e;
+    // map to logical 1200x760 coordinates
+    return [
+        (t.clientX-r.left)*(1200/r.width),
+        (t.clientY-r.top) *(760/r.height)
+    ];
+}
+
+let sbDragging = false;
+
+/* ═══════════════════════════════════════════════════════════════
+   MOUSE DOWN — start drag OR prepare click
+══════════════════════════════════════════════════════════════════ */
+cv.addEventListener('mousedown',e=>{
+    [mx,my]=getXY(e);
+
+    // scrollbar click/drag
+    const SB_X = IC_X0 + IC_COLS*(IC_W+IC_PX) + 6;
+    const SB_W = 8;
+    if(mx>=SB_X && mx<=SB_X+SB_W+4 && my>=ING_TOP && my<=ING_TOP+ING_H){
+        sbDragging=true;
+        const sc=totalH-ING_H;
+        const pct=(my-ING_TOP)/ING_H;
+        scrollT=Math.max(0,Math.min(sc,pct*totalH));
+        return;
+    }
+    // ingredient?
+    let hit=false;
+    ings.forEach((ing,i)=>{
+        const ix=ingX(ing),iy=ingY(ing);
+        if(mx>=ix&&mx<=ix+IC_W&&my>=iy&&my<=iy+IC_H && !ing.inR){
+            hit=true;
+            drag.on=true; drag.type='ing'; drag.srcIdx=i;
+            drag.item={...ing};
+            drag.cx=mx; drag.cy=my;
+            drag.ox=mx-(ix+IC_W/2); drag.oy=my-(iy+IC_H/2);
+        }
+    });
+    if(hit) return;
+    // recipe item?
+    recipe.forEach((_,i)=>{
+        const s=recSlotXY(i);
+        if(mx>=s.x&&mx<=s.x+RC_W&&my>=s.y&&my<=s.y+RC_H){
+            drag.on=true; drag.type='rec'; drag.srcIdx=i;
+            drag.item={...recipe[i]};
+            drag.cx=mx; drag.cy=my;
+            drag.ox=mx-(s.x+RC_W/2); drag.oy=my-(s.y+RC_H/2);
+        }
+    });
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   MOUSE MOVE
+══════════════════════════════════════════════════════════════════ */
+cv.addEventListener('mousemove',e=>{
+    [mx,my]=getXY(e);
+    if(sbDragging){
+        const sc=totalH-ING_H;
+        const pct=Math.max(0,Math.min(1,(my-ING_TOP)/ING_H));
+        scrollT=Math.max(0,Math.min(sc,pct*totalH));
+    }
+    if(drag.on){ drag.cx=mx; drag.cy=my; }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   MOUSE UP — drop or click
+══════════════════════════════════════════════════════════════════ */
+cv.addEventListener('mouseup',e=>{
+    [mx,my]=getXY(e);
+    if(sbDragging){ sbDragging=false; return; }
+    if(drag.on){
+        const d=drag;
+        const moved=Math.hypot(d.cx-( d.type==='ing'?ingX(ings[d.srcIdx])+IC_W/2:recSlotXY(d.srcIdx).x+RC_W/2 ),
+                                d.cy-( d.type==='ing'?ingY(ings[d.srcIdx])+IC_H/2:recSlotXY(d.srcIdx).y+RC_H/2 ));
+
+        if(d.overRecipe && d.type==='ing'){
+            addIng(ings[d.srcIdx], d.dropSlot>=0?d.dropSlot:recipe.length);
+        } else if(d.overRecipe && d.type==='rec'){
+            moveRec(d.srcIdx, d.dropSlot>=0?d.dropSlot:recipe.length);
+        } else if(!d.overRecipe && d.type==='rec'){
+            // dragged out of recipe area — remove
+            removeRec(d.srcIdx);
+        } else if(moved<8 && d.type==='ing'){
+            // tiny move = click
+            addIng(ings[d.srcIdx]);
+        }
+        drag.on=false; drag.item=null; drag.srcIdx=-1; drag.dropSlot=-1; drag.overRecipe=false;
+        return;
+    }
+    // click on recipe item (no drag)
+    recipe.forEach((_,i)=>{
+        const s=recSlotXY(i);
+        if(mx>=s.x&&mx<=s.x+RC_W&&my>=s.y&&my<=s.y+RC_H) removeRec(i);
+    });
+    // ingredient click
+    ings.forEach((ing,i)=>{
+        const ix=ingX(ing),iy=ingY(ing);
+        if(mx>=ix&&mx<=ix+IC_W&&my>=iy&&my<=iy+IC_H) addIng(ing);
+    });
+    if(hovSub) submit();
+    if(hovClr) clearR();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLL
+══════════════════════════════════════════════════════════════════ */
+cv.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const sc=totalH-ING_H;
+    if(sc>0){ scrollT=Math.max(0,Math.min(sc,scrollT+e.deltaY*.55)); }
+},{passive:false});
+
+/* ═══════════════════════════════════════════════════════════════
+   FULLSCREEN — resize canvas to native resolution, no CSS stretching
+══════════════════════════════════════════════════════════════════ */
+function enterFullscreen(){
+    const sw = screen.width  * (window.devicePixelRatio||1);
+    const sh = screen.height * (window.devicePixelRatio||1);
+    // keep logical 1200x760 space, render at native res
+    const scale = Math.min(sw/1200, sh/760);
+    fsScale = scale;
+    cv.width  = Math.round(1200 * scale);
+    cv.height = Math.round(760  * scale);
+    cv.style.width  = screen.width  + 'px';
+    cv.style.height = screen.height + 'px';
+    const gc = document.getElementById('gameContainer');
+    gc.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border-radius:0;border:none;box-shadow:none;background:#060610;';
+}
+
+function exitFullscreen(){
+    fsScale = 1;
+    cv.width  = 1200;
+    cv.height = 760;
+    cv.style.width  = '';
+    cv.style.height = '';
+    const gc = document.getElementById('gameContainer');
+    gc.style.cssText = '';
+    gc.style.borderRadius = '12px';
+    gc.style.border = '1px solid rgba(180,100,255,0.18)';
+    gc.style.boxShadow = '0 0 60px rgba(130,50,255,0.3)';
+}
+
+document.getElementById('fsBtn').addEventListener('click',()=>{
+    if(!document.fullscreenElement)
+        document.getElementById('gameContainer').requestFullscreen().catch(()=>{});
+    else document.exitFullscreen();
+});
+document.addEventListener('fullscreenchange',()=>{
+    document.getElementById('fsBtn').textContent = document.fullscreenElement ? 'EXIT' : '⛶ FULLSCREEN';
+    if(document.fullscreenElement) enterFullscreen(); else exitFullscreen();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   START
+══════════════════════════════════════════════════════════════════ */
+initIngs();
+initRules();
+let fsScale = 1;
+loop();
+</script>
+</body>
+</html>
